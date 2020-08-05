@@ -16,6 +16,8 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from discount import Discount
 
+URI_SCHEME_NETLOC = '{uri.scheme}://{uri.netloc}'
+
 
 def parse_price(price):
     """ parse price from string '159,99 RON' or '159,99 LEI' or '159,99 lei' """
@@ -118,7 +120,7 @@ def discounts_mango(url, scroll_pages, threshold, sleep_time):
                 regular_price, discount_price = get_prices_mango(divs)
             discount_pct = get_discount_pct(discount_price, regular_price)
             if discount_pct > threshold:
-                uri = '{uri.scheme}://{uri.netloc}'.format(uri=(urlparse(url))) + item.a['href']
+                uri = URI_SCHEME_NETLOC.format(uri=(urlparse(url))) + item.a['href']
                 discounts.append(Discount(discount_pct, discount_price, name, uri))
     browser.close()
 
@@ -163,7 +165,7 @@ def discounts_hm(url, threshold_pct, sleep=1):
             discount = parse_price(prices.find('span', class_='sale').text)
             regular = parse_price(prices.find('span', class_='regular').text)
             article = item.find('h3', class_='item-heading')
-            uri = '{uri.scheme}://{uri.netloc}'.format(uri=(urlparse(url))) + article.a['href']
+            uri = URI_SCHEME_NETLOC.format(uri=(urlparse(url))) + article.a['href']
             if get_discount_pct(discount, regular) > threshold_pct:
                 discounts.append(Discount(get_discount_pct(discount, regular), discount, article.a.text, uri))
     except ElementClickInterceptedException as e:
@@ -171,14 +173,46 @@ def discounts_hm(url, threshold_pct, sleep=1):
     browser.close()
 
 
+def discounts_tezyo(url, threshold_pct, price_limit=10000, sleep=2):
+    browser = Chrome()
+    browser.get(url)
+
+    try:
+        condition = True
+        while condition is True:
+            soup = BeautifulSoup(browser.execute_script('return document.documentElement.outerHTML'), 'html.parser')
+            items = soup.find_all('li', class_='item')
+            for item in items:
+                price_p = item.find('p', class_='old-price')
+                if price_p is None:
+                    continue
+                regular = parse_price(price_p.span.text)
+                discount = parse_price(item.find('span', class_='discount-price').span.text)
+                article = item.find('div', class_='product-info')
+                if get_discount_pct(discount, regular) > threshold_pct and discount < price_limit:
+                    discounts.append((Discount(get_discount_pct(discount, regular), discount, article.h2.text, article.a['href'])))
+            pages = browser.find_element(By.CSS_SELECTOR, 'div.pages')
+            next_page = pages.find_elements(By.CSS_SELECTOR, 'li')[-1]
+            if next_page.is_displayed():
+                next_page.click()
+                time.sleep(sleep)
+            last_btn = soup.find('div', class_='pages').find_all('li')[-1]
+            if last_btn.find('a', class_='next') is None:
+                condition = False
+    except ElementClickInterceptedException as e:
+        print(traceback.format_exc())
+    browser.close()
+
+
 if __name__ == "__main__":
 
-    threshold_pct = 40
+    price_limit = 300
+    threshold_pct = 60
     scrolling_pages = 20
     sleep = 1.5
     discounts = []
     URLs_men = [
-        'https://www.reserved.com/ro/ro/sale2-ro/men/bestsellers-ro/sb/0',
+        # 'https://www.reserved.com/ro/ro/sale2-ro/men/bestsellers-ro/sb/0',
         # 'https://www.mangooutlet.com/ro/barbati/haine_c16912476?sort=asc',
         # 'https://shop.mango.com/ro/barbati/recomandate/sale_d14332139?sort=asc',
         # 'https://www.zara.com/ro/ro/barbat-outerwear-l715.html',
@@ -194,6 +228,7 @@ if __name__ == "__main__":
         # 'https://www.zara.com/ro/ro/barbat-pantofi-l769.html',
         # 'https://www.zara.com/ro/ro/barbat-genti-l563.html',
         # 'https://www2.hm.com/ro_ro/reduceri/barbati/view-all.html',
+        'https://www.tezyo.ro/reduceri?limit=80&marime=33&p=1&sex=80',
     ]
     URLs_women = [
         # 'https://www.reserved.com/ro/ro/sale2-ro/woman/bestsellers-ro/sb/0',
@@ -221,7 +256,7 @@ if __name__ == "__main__":
         # 'https://www.reserved.com/ro/ro/sale2-ro/kids-girl/bestsellers-ro/sb/0',
         # 'https://www.mangooutlet.com/ro/fete/haine_c80999254?sort=asc',
         # 'https://shop.mango.com/ro/fete/recomandate/sale_d16168230?sort=asc',
-        'https://www2.hm.com/ro_ro/reduceri/copii/girls-size18m-10y.html',
+        # 'https://www2.hm.com/ro_ro/reduceri/copii/girls-size18m-10y.html',
     ]
     URLs = [
         URLs_men,
@@ -238,6 +273,8 @@ if __name__ == "__main__":
             discounts_zara(url, threshold_pct)
         elif 'hm.com' in url:
             discounts_hm(url, threshold_pct)
+        elif 'tezyo.ro' in url:
+            discounts_tezyo(url, threshold_pct, price_limit=price_limit)
 
     for discount in sorted(discounts, reverse=True):
         print(discount)
